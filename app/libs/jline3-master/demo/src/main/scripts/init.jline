@@ -1,0 +1,196 @@
+#
+# All imports added here are imported also to your groovy shell
+#
+import java.nio.file.*
+import java.util.regex.*
+import org.jline.utils.*
+
+PATH = [ROOT + 'scripts']
+#
+# console options
+#
+CONSOLE_OPTIONS = [:]
+CONSOLE_OPTIONS.docs = [:]
+CONSOLE_OPTIONS['docs'].put('jline','https://github.com/jline/jline3/wiki')
+CONSOLE_OPTIONS['docs'].put('groovy','http://groovy-lang.org/documentation.html')
+CONSOLE_OPTIONS['docs'].put('.*groovy/.*','http://docs.groovy-lang.org/latest/html/gapi/')
+CONSOLE_OPTIONS['docs'].put('java.*',['https://docs.oracle.com/javase/8/docs/api/',
+                                      'http://docs.groovy-lang.org/latest/html/groovy-jdk/'])
+CONSOLE_OPTIONS['docs'].put('.*/java.*','https://docs.oracle.com/javase/8/docs/api/')
+CONSOLE_OPTIONS['docs'].put('org/jline/.*','https://www.javadoc.io/doc/org.jline/jline/latest/')
+CONSOLE_OPTIONS.PRNT_COLORS = 'th=HEADER:rn=ROW_NUMBER:rs=ROW_STYLE:mk=ATTRIBUTE:em=ERROR:vs=DEBUG'
+CONSOLE_OPTIONS.LS_COLORS = 'di=PATH:ex=EXECUTABLE:ln=LINK:fi='
+CONSOLE_OPTIONS.HELP_COLORS = "ti=TITLE:co=1:ar=3:op=OPTION"
+CONSOLE_OPTIONS.READER_COLORS = [:]
+CONSOLE_OPTIONS['READER_COLORS'].put('COMPLETION_STYLE_LIST_BACKGROUND', 'LIST_BACKGROUND')
+CONSOLE_OPTIONS['READER_COLORS'].put('COMPLETION_STYLE_LIST_GROUP', 'LIST_GROUP')
+
+# refresh nanorc theme: command adds NANORC_THEME map to CONSOLE_OPTIONS and updates lineReader colors
+highlighter -r
+
+#
+# customize prnt command
+#
+def _reader2map(reader){
+    def out = [:]
+    out['othersGroupName'] = reader.othersGroupName
+    out['keyMap'] = reader.keyMap
+    out['autosuggestion'] = reader.autosuggestion
+    out['terminal.kind'] = reader.terminal.kind
+    out
+}
+
+def _reader2string(reader){
+    def out = "["
+    out += 'othersGroupName:' + reader.othersGroupName + ', '
+    out += 'keyMap:' + reader.keyMap + ', '
+    out += 'autosuggestion:' + reader.autosuggestion + ', '
+    out += 'terminal.kind:' + reader.terminal.kind
+    out += ']'
+    out
+}
+
+def _number2date(number){
+    def out = null
+    try {
+        out = number instanceof Long ? new Date(number) : number
+    } catch (Exception e) {
+        out = number
+    }
+    new AttributedString(out.toString())
+}
+
+def _orgJline(p) {
+    def out = p
+    if (p.toString().startsWith('org.jline')) {
+        def m = Pattern.compile('(org\\.jline(\\.[a-z]+)*)(.*)').matcher(p.toString())
+        if (m.find()) {
+            def asb = new AttributedStringBuilder()
+            asb.append(m.group(1),AttributedStyle.DEFAULT.foreground(AttributedStyle.YELLOW + AttributedStyle.BRIGHT))
+            asb.append(m.group(3))
+            out = asb.toAttributedString()
+        }
+    }
+    out
+}
+
+PRNT_OPTIONS = [:]
+PRNT_OPTIONS.objectToMap = [:]
+PRNT_OPTIONS.objectToString = [:]
+PRNT_OPTIONS.highlightValue = [:]
+PRNT_OPTIONS['objectToMap'].put(org.jline.reader.impl.LineReaderImpl, _reader2map)
+PRNT_OPTIONS['objectToString'].put(org.jline.reader.impl.LineReaderImpl, _reader2string)
+PRNT_OPTIONS['highlightValue'].put('time.*', _number2date)
+PRNT_OPTIONS['highlightValue'].put('*', _orgJline)
+PRNT_OPTIONS.valueStyle = 'GRON'
+PRNT_OPTIONS.border = '│'
+
+GROOVY_OPTIONS = [:]
+GROOVY_OPTIONS.identifiersCompletion = true
+GROOVY_OPTIONS.allFieldsCompletion = false
+GROOVY_OPTIONS.allMethodsCompletion = false
+GROOVY_OPTIONS.metaMethodsCompletion = false
+GROOVY_OPTIONS.allClassesCompletion = false
+GROOVY_OPTIONS.allConstructorsCompletion = false
+GROOVY_OPTIONS.syntheticMethodsCompletion = false
+GROOVY_OPTIONS.GROOVY_COLORS = 'ti=TITLE:me=ERROR'
+GROOVY_OPTIONS.nanorcSyntax = 'Java'
+GROOVY_OPTIONS.nanorcValue = 'GRON'
+#
+# custom Groovy pipes
+#
+pipe --delete *
+pipe |.  '.collect{' '}'
+pipe |:  '.collectEntries{' '}'
+pipe |:: '.collectMany{' '}'
+pipe |?  '.findAll{' '}'
+pipe |?1 '.find{' '}'
+pipe |!  '.each{' '}'
+pipe |#  '.take(' ')'
+pipe |&  '.' ' '
+pipe grep '.collect{it.toString()}.findAll{it=~/' '/}'
+alias null '|& identity{}' 
+alias xargs '|; %{0} %{1} %{2} %{3} %{4} %{5} %{6} %{7} %{8} %{9}'
+alias sort '|& sort{def p = %{@}; p[0].startsWith("-") ? -it[p[0].substring(1)] : it[p[0]]}'
+alias distinct '|& unique()'
+#
+# test-widget reads widget name from buffer and execute it
+#
+def _testWidget() {
+    def name = _buffer().toString().split('\\s+')[0]
+    _widget "$name"
+}
+#
+# create _tailtip-toggle widget that changes also maximum candidates to display
+#
+def _tailTipToggle() {
+    def al = _reader.getWidgets().get('accept-line').toString()
+    def enabled = al == '_tailtip-accept-line'
+    if (enabled) {
+        _reader.setVariable('list-max',100)
+        _reader.option(org.jline.reader.LineReader.Option.INSERT_BRACKET, true)
+    } else {
+        _reader.setVariable('list-max',50)
+        _reader.option(org.jline.reader.LineReader.Option.INSERT_BRACKET, false)
+    }
+    _widget 'tailtip-toggle'
+}
+#
+# widget functions to open web doc of jline and groovy
+#
+def _docJline() {
+    :doc jline
+}
+
+def _docGroovy() {
+    :doc groovy
+}
+#
+# widget functions for groovy autosuggestion completion
+#
+def _toggleFields() {
+    GROOVY_OPTIONS.allFieldsCompletion = !GROOVY_OPTIONS.allFieldsCompletion
+}
+
+def _toggleMethods() {
+    GROOVY_OPTIONS.allMethodsCompletion = !GROOVY_OPTIONS.allMethodsCompletion
+}
+
+def _toggleMetaMethods() {
+    GROOVY_OPTIONS.metaMethodsCompletion = !GROOVY_OPTIONS.metaMethodsCompletion
+}
+
+def _toggleMenuList() {
+    def optAutoMenu = org.jline.reader.LineReader.Option.AUTO_MENU_LIST
+    _reader.option(optAutoMenu, !_reader.isSet(optAutoMenu))
+}
+#
+# resolve function keys
+#
+def _getkey(name) {
+    def key
+    key=:tget $name
+    key.values()[0]
+}
+_f1 = _getkey('key_f1')
+_f2 = _getkey('key_f2')
+
+widget -N _test-widget _testWidget
+widget -N _tailtip-toggle _tailTipToggle
+widget -N _doc-jline _docJline
+widget -N _doc-groovy _docGroovy
+widget -N _toggle-fields _toggleFields
+widget -N _toggle-methods _toggleMethods
+widget -N _toggle-meta-methods _toggleMetaMethods
+widget -N _toggle-menu-list _toggleMenuList
+
+keymap '^[^x' _test-widget
+keymap '^[s'  _tailtip-toggle
+keymap '^[f'  _toggle-fields
+keymap '^[g'  _toggle-meta-methods
+keymap '^[m'  _toggle-methods
+keymap '^[l'  _toggle-menu-list
+if (_f1 && _f2) {
+    :keymap $_f1   _doc-jline
+    :keymap $_f2   _doc-groovy
+}

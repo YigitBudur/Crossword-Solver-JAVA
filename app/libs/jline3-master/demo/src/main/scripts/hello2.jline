@@ -1,0 +1,23 @@
+# test console script
+# END_HELP
+import org.jline.utils.*
+
+println "Is Windows: " + OSUtils.IS_WINDOWS
+
+array=[0,1]
+
+array.each {
+    println it
+    :prnt $ROOT
+}.identity{}
+
+_reader = org.jline.console.SystemRegistry.get().consoleEngine().reader
+prnt $_reader
+prnt --toString $_reader
+
+params = $@
+prnt -s JSON $params
+
+println('hello ' + ${1:-world} + '!')
+
+exit 'ok' 

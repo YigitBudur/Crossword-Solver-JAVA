@@ -1,0 +1,176 @@
+# Load base profile
+if { $.reader } {
+    source ((($.reader parser) class) getResource "/gosh_profile")
+}
+
+status = {
+    p1 = $1
+    if { "on" equals $p1 } {
+        __status_on
+    } elif { "off" equals $p1 } {
+        ($.terminal status) update null
+    } else {
+        echo "Error: use 'status on' or 'status off'."
+    }
+}
+
+__status_on = {
+    sb = (new org.jline.utils.AttributedStringBuilder)
+    $sb style (($sb style) foreground 2)
+    cols = ($.terminal width)
+    each {1..$cols} { $sb append $'\u2500' }
+    s1 = ($sb toAttributedString)
+    $sb setLength 0
+    $sb style (($sb style) foreground 0)
+    $sb append "  "
+    $sb style (($sb style) inverse)
+    $sb append "^L"
+    $sb style (($sb style) inverseOff)
+    $sb append " Clear  "
+    $sb style (($sb style) inverse)
+    $sb append "^D"
+    $sb style (($sb style) inverseOff)
+    $sb append " Exit  "
+    $sb style (($sb style) inverse)
+    $sb append "^C"
+    $sb style (($sb style) inverseOff)
+    $sb append " Interrupt  "
+    s2 = ($sb toAttributedString)
+    ($.terminal status) update [ $s1 $s2 ]
+}
+
+
+__load_class_from = {
+	(($1 class) getClassLoader) loadClass $2
+}
+__get_static_field = {
+	((__load_class_from $.session $1) getField $2) get null
+}
+__call_static_method_no_arg = {
+	((__load_class_from $.session $1) getMethod $2) invoke null
+}
+__new_candidate = {
+    new org.jline.reader.Candidate $1 $1 null $2 null null true
+}
+
+# Define the $.process variable
+\#.process = {
+    __call_static_method_no_arg "org.apache.felix.service.command.Process\$Utils" "current"
+}
+# Define the $.job variable
+\#.job = {
+    __call_static_method_no_arg "org.apache.felix.service.command.Job\$Utils" "current"
+}
+
+__process_stream = {
+  (($.job processes) get 0) $1
+}
+
+# with gogo-jline-1.0.4, should not be needed at all, see FELIX-5463 and FELIX-5462
+(($.processor class) getMethod "addConverter" (__load_class_from $.processor "org.apache.felix.service.command.Converter")) invoke $.processor (new org.jline.demo.FunctionConverter)
+
+if { $.terminal } then {
+    try {
+        complete -c gogo:nano -e
+        complete -c gogo:nano -d "File editor"
+        complete -c gogo:nano -s R -l restricted --description "Restricted mode"
+        complete -c gogo:nano -a '__files'
+
+        #
+        # TTop command
+        #
+        __ttop = {
+            _cl = (__load_class_from $.reader "org.jline.builtins.TTop")
+            $_cl "ttop" $.terminal (__process_stream "out") (__process_stream "err") ${argv[@]}
+        }
+        $.processor addcommand "gogo" $__ttop "ttop" 0
+
+        complete -c gogo:ttop -e
+        complete -c gogo:ttop -d "Display and update sorted information about threads"
+        complete -c gogo:ttop -s o -l order --description "Comma separated list of sorting keys"
+        complete -c gogo:ttop -s t -l stats --description "Comma separated list of stats to display"
+
+        max_colors = ($.terminal getNumericCapability "max_colors")
+        if { %(max_colors >= 256) } then {
+            HIGHLIGHTER_COLORS = "rs=35:st=32:nu=32:co=32:va=36:vn=36:fu=1;38;5;69:bf=1;38;5;197:re=90"
+        } else {
+            HIGHLIGHTER_COLORS = "rs=35:st=32:nu=32:co=32:va=36:vn=36:fu=94:bf=91:re=90"
+        }
+
+        __tmux_commands = [
+          (__new_candidate send-prefix "Send prefix")
+          (__new_candidate split-window "Split the current window")
+          (__new_candidate select-pane "Select pane")
+          (__new_candidate resize-pane "Resize pane")
+          (__new_candidate display-pane "Display panes")
+          (__new_candidate clock-mode "Clock mode")
+          (__new_candidate set-option "Set option")
+          (__new_candidate list-keys "List keys")
+          (__new_candidate send-keys "Send keys")
+          (__new_candidate bind-key "Bind key")
+          (__new_candidate unbind-key "Unbind key")
+        ]
+        complete -c gogo:tmux -e
+        complete -c gogo:tmux -d "Terminal multiplexer"
+        complete -c gogo:tmux -s h -l help --description "Display help and exit" -n '__option_not_present -h --help'
+        complete -c gogo:tmux -a 'wi = ($.commandLine wordIndex); if { %(wi==1) } { $__tmux_commands } { [ ] }'
+
+        __gogo = (new "org.jline.demo.Gogo" $.processor)
+        __remote_ssh_support = (new org.jline.builtins.ssh.Ssh \
+            ($__gogo shell) \
+            ($__gogo command) \
+            {
+              server = ((new org.apache.sshd.server.ServerBuilder) build)
+              $server setPasswordAuthenticator (__get_static_field org.apache.sshd.server.auth.password.AcceptAllPasswordAuthenticator INSTANCE)
+              $server setPublickeyAuthenticator (__get_static_field org.apache.sshd.server.auth.pubkey.AcceptAllPublickeyAuthenticator INSTANCE)
+              $server
+            } \
+            { (new org.apache.sshd.client.ClientBuilder) build } )
+        __remote_sshd = {
+            # See FELIX-5465, should be:
+            # a = [ "sshd" ${argv[@]} ]
+            a = [ "sshd" ]
+            each $argv { $a add $it }
+            $__remote_ssh_support sshd (__process_stream "out") (__process_stream "err") ${a[@]}
+        }
+        __remote_ssh = {
+            # See FELIX-5465, should be:
+            # a = [ "ssh" ${argv[@]} ]
+            a = [ "ssh" ]
+            each $argv { $a add $it }
+            $__remote_ssh_support ssh $.terminal $.reader $USER (__process_stream "in") (__process_stream "out") (__process_stream "err") ${a[@]}
+        }
+        $.processor addcommand "remote" $__remote_sshd "sshd" 0
+        $.processor addcommand "remote" $__remote_ssh "ssh" 0
+
+        complete -c remote:sshd -e
+        complete -c remote:sshd -d "SSH daemon"
+        complete -c remote:sshd -s i -l ip --description "Listening IP interface" -n '__option_not_present -i --ip'
+        complete -c remote:sshd -s p -l port --description "Listening IP port" -n '__option_not_present -p --port'
+        complete -c remote:sshd -a '[start stop status]'
+
+
+        complete -c remote:ssh -e
+        complete -c remote:ssh -d "SSH client"
+
+        __remote_telnet_support = (new org.jline.builtins.telnet.Telnet $.terminal ($__gogo telnet))
+        __remote_telnetd = {
+            a = [ "telnetd" ]
+            each $argv { $a add $it }
+            $__remote_telnet_support telnetd ${a[@]}
+        }
+        $.processor addcommand "remote" $__remote_telnetd "telnetd" 0
+
+        complete -c remote:telnetd -e
+        complete -c remote:telnetd -d "Telnet daemon"
+        complete -c remote:telnetd -s i -l ip --description "Listening IP interface" -n '__option_not_present -i --ip'
+        complete -c remote:telnetd -s p -l port --description "Listening IP port" -n '__option_not_present -p --port'
+        complete -c remote:telnetd -a '[start stop status]'
+
+    } catch {
+        if { not { (($exception cause) toString) startsWith "java.lang.NoClassDefFoundError: org/apache/sshd/" } } then {
+            $exception printStackTrace
+        }
+    }
+
+}
